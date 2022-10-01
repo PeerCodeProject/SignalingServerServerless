@@ -1,0 +1,127 @@
+
+
+Resources:
+  YWebRtcTopicsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      KeySchema:
+        - AttributeName: name
+          KeyType: HASH
+      AttributeDefinitions:
+        - AttributeName: name
+          AttributeType: S
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      Tags:
+        - Key: Name
+          Value: y-webrtc-topics-table
+
+  YWebRtcApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: ywebrtc-api
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: "$request.body.type"
+
+  YWebRtcIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref YWebRtcApi
+      Description: y-webrtc signaling integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${YWebRtcSignalingLambdaFunction.Arn}/invocations
+
+  YWebRtcConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref YWebRtcApi
+      RouteKey: $connect
+      AuthorizationType: NONE
+      OperationName: ConnectRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref YWebRtcIntegration
+  YWebRtcDisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref YWebRtcApi
+      RouteKey: $disconnect
+      AuthorizationType: NONE
+      OperationName: DisconnectRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref YWebRtcIntegration
+  YWebRtcDefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref YWebRtcApi
+      RouteKey: $default
+      AuthorizationType: NONE
+      OperationName: DefaultRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref YWebRtcIntegration
+
+  YWebRtcDeployment:
+    Type: AWS::ApiGatewayV2::Deployment
+    DependsOn:
+      - YWebRtcConnectRoute
+      - YWebRtcDisconnectRoute
+      - YWebRtcDefaultRoute
+    Properties:
+      ApiId: !Ref YWebRtcApi
+
+  YWebRtcApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      StageName: dev
+      DeploymentId: !Ref YWebRtcDeployment
+      ApiId: !Ref YWebRtcApi
+
+  YWebRtcInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref YWebRtcSignalingLambdaFunction
+      Principal: apigateway.amazonaws.com
+
+  YWebRtcApiCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Sub 'webrtc.${Domain}'
+      DomainValidationOptions:
+        - DomainName: !Sub 'webrtc.${Domain}'
+          HostedZoneId: !Ref HostedZoneId
+      ValidationMethod: DNS
+
+  YWebRtcApiDomainName:
+    Type: AWS::ApiGatewayV2::DomainName
+    Properties:
+      DomainName: !Sub 'webrtc.${Domain}'
+      DomainNameConfigurations:
+        - CertificateArn: !Ref YWebRtcApiCertificate
+          SecurityPolicy: TLS_1_2
+
+  YWebRtcApiMapping:
+    Type: AWS::ApiGatewayV2::ApiMapping
+    Properties:
+      ApiId: !Ref YWebRtcApi
+      DomainName: !Sub 'webrtc.${Domain}'
+      Stage: !Ref YWebRtcApiStage
+    DependsOn:
+      - YWebRtcApiDomainName
+
+  YWebRtcApiRecordSet:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      AliasTarget:
+        DNSName: !GetAtt YWebRtcApiDomainName.RegionalDomainName
+        HostedZoneId: !GetAtt YWebRtcApiDomainName.RegionalHostedZoneId
+      # See https://forums.aws.amazon.com/thread.jspa?threadID=103919: The `HostedZoneName` requires the trailing dot.
+      HostedZoneName: !Sub '${Domain}.'
+      Name: !Sub 'webrtc.${Domain}'
+      Type: A 

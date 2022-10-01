@@ -1,0 +1,1 @@
+{"version":"0.1.0","name":"signaling-server-cdk","dependencies":{"aws-cdk-lib":{"version":"2.44.0"},"constructs":{"version":"10.1.118"},"source-map-support":{"version":"0.5.21"}}}
